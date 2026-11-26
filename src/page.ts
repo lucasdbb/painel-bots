@@ -7,6 +7,7 @@ import { mudouSentado, rotaEscritorio, trajeto } from "./caminhada.js";
 import { elevSeta } from "./elevador.js";
 import { cargoCurto, nomeCurto, orgArvore, orgCasa, orgNovo } from "./organograma.js";
 import { distribuiCopa, parados, posicionaRotulo, sentaNaMesa } from "./painel.js";
+import { nivelBackup } from "./backup-resumo.js";
 
 const STYLE = String.raw`
 @font-face{font-family:'Orbitron';src:url(/fonts/orbitron.woff2) format('woff2');font-weight:400 900;font-display:swap}
@@ -258,6 +259,20 @@ a{color:inherit;text-decoration:none}button,.btn{font:inherit;cursor:pointer;bor
 @media (prefers-reduced-motion:reduce){.bot-g:hover .hov{transform:none}}
 @media (max-width:1500px){#topo{gap:12px;padding:0 12px}#topo .wm{display:none}#topo .titulo{font-size:17px}.contas{gap:6px}.contas span{padding:0 10px;font-size:13px}.abas button{padding:10px 12px}}
 @media (max-width:1250px){#topo .vsep,#topo .vivo>span:not(.dot):not(#hora){display:none}.contas span{font-size:12px;padding:0 8px;gap:5px}.abas button{letter-spacing:.06em;padding:10px 9px;font-size:11.5px}}
+/* card "Último backup" (só metadados) */
+#dir .backupc{flex:none;padding:12px 16px}#dir .backupc .h{margin-bottom:6px;font-size:13px}
+#dir .backupc.atrasado{border-color:rgba(212,175,55,.55)}
+.bkl{display:flex;align-items:center;gap:12px}.bkl .dt{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:16px;color:var(--wh);white-space:pre}
+.bkl .nb{margin-left:auto;font-size:13px;font-weight:500;color:var(--mu);white-space:nowrap}
+.bkp{margin-left:auto;font-family:Inter,sans-serif;letter-spacing:0;text-transform:none;display:inline-flex;align-items:center;gap:6px;height:20px;padding:0 9px;border-radius:999px;font-size:12px;font-weight:700;background:rgba(31,224,168,.16);border:1px solid rgba(31,224,168,.6);color:var(--mint)}
+.bkp i{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 6px currentColor}
+.bkp.atrasado{background:rgba(212,175,55,.16);border-color:rgba(212,175,55,.65);color:var(--go)}
+/* Natal na copa: luzes da árvore pulsam de leve (paradas com movimento reduzido, pelo media acima) */
+.luz-natal{animation:pulsa-luz 1.8s ease-in-out infinite}@keyframes pulsa-luz{0%,100%{opacity:.72}50%{opacity:1}}
+/* tela baixa: o card vira uma linha só (título · data · bots · status) para não espremer Passos e o botão Abrir chat */
+@media (max-height:860px){#dir{gap:8px}#dir .backupc{padding:7px 14px;display:flex;align-items:center;gap:12px}#dir .backupc .h,#dir .backupc .bkl{display:contents}
+#dir .backupc .h{font-size:13px;white-space:nowrap}#dir .backupc .h .u{display:none}.bkl .dt{order:1;font-size:14px;white-space:normal}.bkl .nb{order:2}#dir .backupc .bkp{order:3;margin-left:0}#dir .rotc{flex-grow:6;min-height:96px}}
+@media (max-height:860px) and (max-width:1500px){#dir .backupc{gap:9px}.bkl .dt{font-size:13px}}
 @media (max-height:860px){.it{padding:6px 0}.ro{padding:8px 0}.act{padding:7px 0}.card{padding:11px 14px}.mt b{font-size:20px}.mt div{padding:6px 10px}}
 .login-wrap{position:relative;z-index:1;min-height:100%;display:grid;place-items:center;padding:20px}
 .login{width:100%;max-width:380px;padding:26px}
@@ -291,6 +306,8 @@ var VERBO={working:'começou',idle:'parou',waiting_user:'pediu você',error:'deu
 var COR_ST={working:'#00F0FF',idle:'#6B7C9E',waiting_user:'#D4AF37',error:'#FF3B6B',done:'#6B7C9E',none:'#6B7C9E'};
 var CORES={violet:'#8b5cf6',blue:'#3b82f6',cyan:'#06b6d4',green:'#22c55e',orange:'#f97316',red:'#ef4444',black:'#2b2b33',gray:'#9ca3af',grey:'#9ca3af'};
 var HANDOFF_MS=8000,PARADO_H=12,ASSENTOS_MESA=5;
+// último backup (só metadados, de GET /api/backup): ja = já respondeu uma vez; v = resumo ou null
+var bkp={ja:false,v:null,k:'',em:0,voo:false,erro:false};
 var st=null,andarSel=null,botSel=null,aba='mapa',fechados={},uid=0,geo=null,sig='',vistos=null,ativos=[],hoTimer=0,slotCopa={},elevCtl=null;
 // transições: troca de andar (1,5 s) e zoom no bot (1 s); com movimento reduzido, só esmaecimento
 var RM=window.matchMedia('(prefers-reduced-motion: reduce)'),zoom=null,neon=null,cam0={s:1,x:0,y:0},animCam=false,transAndar=0,ultSel='';
@@ -412,6 +429,57 @@ function lin(defs,id,c1,c2,x2,y2){var r=sv('linearGradient',{id:id,x1:0,y1:0,x2:
 function planta(par,x,y){var g=sv('g',null,par);caixa(g,x-.35,y-.35,0,x+.35,y+.35,.55,'#1E2750','#121A3A','#0E1530','#00F0FF',.6);
  var c=P(x,y,.55);[[-.4,-1.0,.3,.6,-20],[.35,-.95,.28,.55,25],[0,-1.4,.27,.65,0],[-.55,-.5,.32,.45,-50],[.5,-.45,.32,.45,50]].forEach(function(f,i){
   sv('ellipse',{cx:c[0]+f[0]*34,cy:c[1]+f[1]*34,rx:f[2]*34,ry:f[3]*34,fill:i%2?'#0E8F6E':'#17B58A',transform:'rotate('+f[4]+' '+(c[0]+f[0]*34)+' '+(c[1]+f[1]*34)+')',stroke:'#1FE0A8','stroke-opacity':.5},g);});return g;}
+// ---- Natal na copa + cofre do backup (paleta ANA: verdes frios, ciano, roxo e dourado; sem vermelho) ----
+// tronco de pirâmide de planta quadrada (losango na tela): faces +y, +x e topo, como caixa()
+function tronco(par,x,y,z0,z1,r0,r1,fy,fx,top,stroke){var s={stroke:stroke,'stroke-width':1.1,'stroke-linejoin':'round'};
+ quad(par,[[x-r0,y+r0,z0],[x+r0,y+r0,z0],[x+r1,y+r1,z1],[x-r1,y+r1,z1]],fy,s);
+ quad(par,[[x+r0,y-r0,z0],[x+r0,y+r0,z0],[x+r1,y+r1,z1],[x+r1,y-r1,z1]],fx,s);
+ quad(par,[[x-r1,y-r1,z1],[x+r1,y-r1,z1],[x+r1,y+r1,z1],[x-r1,y+r1,z1]],top,s);}
+// [z0,z1,r0,r1, face +y, face +x, topo, aresta]
+var ARV=[[.5,1.62,.69,.46,'#0C4538','#146B56','#178A6A','#147A62'],[1.38,2.48,.54,.34,'#0E5242','#187A62','#1C9874','#1A8F70'],
+ [2.24,3.28,.4,.22,'#12604C','#1C8A6E','#22A87E','#22A07C'],[3.1,4.05,.26,.04,'#16705A','#229E7C','#2CBC8C','#1FE0A8']];
+var LUZ=['#00F0FF','#8B8FFA','#D4AF37','#6366F1'];
+function arvoreNatal(par,x,y){var g=sv('g',{class:'natal'},par),c0=P(x,y,0),m=P(x,y,2.1),nl=0;
+ sv('title',null,g,'Árvore de Natal');
+ sv('ellipse',{cx:c0[0],cy:c0[1]+3,rx:40,ry:15,fill:'#000','fill-opacity':.35,filter:'url(#b3)'},g);
+ sv('ellipse',{cx:m[0],cy:m[1],rx:34,ry:62,fill:'#00F0FF','fill-opacity':.07,filter:'url(#b16)'},g);
+ caixa(g,x-.16,y-.16,0,x+.16,y+.16,.62,'#242A4E','#12162C','#181D3A','#3A4578',.9);
+ ARV.forEach(function(t,i){tronco(g,x,y,t[0],t[1],t[2],t[3],t[4],t[5],t[6],t[7]);
+  // festão dourado nas duas faces visíveis e luzes ao longo dele
+  var zm=t[0]+(t[1]-t[0])*.3,rm=t[2]+(t[3]-t[2])*.3,rr=rm+.015;
+  sv('polyline',{points:pt([[x-rr,y+rr,zm+.14],[x+rr,y+rr,zm-.08],[x+rr,y-rr,zm+.14]]),fill:'none',stroke:'#D4AF37','stroke-width':1.3,'stroke-opacity':.85},g);
+  var k=[6,5,4,2][i];for(var j=0;j<k;j++){var u=(j+.5)/k*2,px=u<1?x-rr+2*rr*u:x+rr,py=u<1?y+rr:y+rr-2*rr*(u-1),pz=zm+.14-.22*(1-Math.abs(u-1))+.05;
+   var q=P(px,py,pz),cor=LUZ[nl%LUZ.length],l=sv('g',{class:'luz-natal'},g);l.style.animationDelay=(nl*.17).toFixed(2)+'s';
+   sv('circle',{cx:q[0],cy:q[1],r:5,fill:cor,'fill-opacity':.3},l);sv('circle',{cx:q[0],cy:q[1],r:2.2,fill:cor},l);nl++;}});
+ // estrela no topo (billboard 2D, como a do fundo)
+ var e=P(x,y,4.3);sv('circle',{cx:e[0],cy:e[1],r:16,fill:'#D4AF37','fill-opacity':.35,filter:'url(#b8)'},g);
+ sv('polygon',{points:star(e[0],e[1],9,3.8),fill:'#D4AF37',stroke:'#FFF3C4','stroke-width':.8},g);return g;}
+// presentes embaixo da árvore: [dx,dy,lado,altura, topo, face +y, face +x, aresta, fita]
+var PRESENTES=[[.55,-.8,.56,.5,'#4F52C9','#2A2D7A','#363A9A','#8B8FFA','#00F0FF'],[-.75,-.1,.5,.44,'#1A8A96','#0A3848','#0F4A5A','#00F0FF','#D4AF37'],
+ [.75,-.05,.36,.3,'#8B8FFA','#3A3E8A','#4A4EA8','#C7D2FE','#D4AF37'],[.42,.48,.4,.32,'#D4AF37','#7A6420','#9A7E28','#FFE9A8','#6366F1']];
+// frente=0: só os de trás da árvore (desenhados antes dela); frente=1: os da frente
+function presentesNatal(par,x,y,frente){var g=sv('g',null,par);
+ PRESENTES.filter(function(p){return (p[0]+p[1]>=0)===!!frente;}).sort(function(a,b){return a[0]+a[1]-b[0]-b[1];}).forEach(function(p){var cx=x+p[0],cy=y+p[1],h2=p[2]/2,h=p[3],c=P(cx,cy,0);
+  sv('ellipse',{cx:c[0],cy:c[1]+2,rx:p[2]*30,ry:p[2]*12,fill:'#000','fill-opacity':.3},g);
+  caixa(g,cx-h2,cy-h2,0,cx+h2,cy+h2,h,p[4],p[5],p[6],p[7],1);
+  var fs={fill:'none',stroke:p[8],'stroke-width':2.2};
+  sv('polyline',Object.assign({points:pt([[cx,cy+h2,0],[cx,cy+h2,h],[cx,cy-h2,h]])},fs),g);
+  sv('polyline',Object.assign({points:pt([[cx+h2,cy,0],[cx+h2,cy,h],[cx-h2,cy,h]])},fs),g);
+  var t=P(cx,cy,h);sv('ellipse',{cx:t[0]-4,cy:t[1]-2,rx:4.5,ry:2.6,fill:'none',stroke:p[8],'stroke-width':1.6},g);sv('ellipse',{cx:t[0]+4,cy:t[1]-2,rx:4.5,ry:2.6,fill:'none',stroke:p[8],'stroke-width':1.6},g);
+  sv('circle',{cx:t[0],cy:t[1]-1.5,r:1.8,fill:p[8]},g);});return g;}
+// cofre do backup: LED verde (ok, até 26 h), âmbar (atrasado) ou apagado (sem backup). Só reflete metadados.
+var COR_COFRE={ok:'#1FE0A8',atrasado:'#D4AF37',vazio:'#2A3354'},TXT_COFRE={ok:'último backup ok',atrasado:'backup atrasado (mais de 26 h)',vazio:'sem backup ainda'};
+function cofreBackup(par,x,y,nv){var g=sv('g',{class:'cofre '+nv},par),c0=P(x,y,0),x0=x-.48,x1=x+.48,y0=y-.35,y1=y+.35,h=1.18;
+ sv('title',null,g,'Cofre do backup: '+(TXT_COFRE[nv]||TXT_COFRE.vazio));
+ sv('ellipse',{cx:c0[0],cy:c0[1]+4,rx:30,ry:11,fill:'#000','fill-opacity':.4,filter:'url(#b3)'},g);
+ caixa(g,x0,y0,0,x1,y1,h,'#1C2A5C','#10183F','#0C1332','#00F0FF',1.1);
+ quad(g,[[x0+.08,y1,.1],[x1-.14,y1,.1],[x1-.14,y1,h-.12],[x0+.08,y1,h-.12]],'#152048',{stroke:'#D4AF37','stroke-width':1.3,'stroke-linejoin':'round'});
+ var d=P(x-.12,y1,.58);sv('circle',{cx:d[0],cy:d[1],r:7,fill:'#3A3418',stroke:'#D4AF37','stroke-width':1.5},g);sv('circle',{cx:d[0],cy:d[1],r:3,fill:'#D4AF37'},g);
+ var hd=P(x0+.2,y1,.78);sv('line',{x1:hd[0],y1:hd[1],x2:d[0]-5,y2:d[1]-3,stroke:'#D4AF37','stroke-width':3,'stroke-linecap':'round'},g);
+ var cor=COR_COFRE[nv]||COR_COFRE.vazio,ld=P(x1-.26,y1,.92);
+ if(nv!=='vazio')sv('circle',{cx:ld[0],cy:ld[1],r:9,fill:cor,'fill-opacity':.45,filter:'url(#b3)'},g);
+ sv('circle',{cx:ld[0],cy:ld[1],r:3.4,fill:cor,stroke:nv==='vazio'?'#3A4578':'none'},g);
+ sv('polyline',{points:pt([[x0,y0,h],[x1,y0,h],[x1,y1,h]]),fill:'none',stroke:'#00F0FF','stroke-width':1.3,'stroke-opacity':.85},g);return g;}
 // cadeira de escritório: base com rodízios, haste, assento, encosto e braços (voltada para +y)
 function cadeira(par,x,y,cor){var g=sv('g',null,par),c0=P(x,y,0);
  sv('ellipse',{cx:c0[0],cy:c0[1]+2,rx:22,ry:9,fill:'#000','fill-opacity':.35,filter:'url(#b3)'},g);
@@ -600,6 +668,11 @@ function cena(lista){
  add(2012+19.2+8.5+.5,function(){var g=sv('g',null,objPar);caixa(g,18.6,7.6,0,20.0,9.8,.55,'#1C2A5C','#10183F','#0C1332','#D4AF37',1.2);caneca(g,19.0,8.3,.6,true);caneca(g,19.4,9.2,.6,true);caneca(g,19.9,8.8,.6,false);});
  poltrona(18.8,5.4);poltrona(21.0,5.4);[15.4,17.3,19.2,21.1].forEach(function(x){banquinho(x,2.8);});
  [[16.4,12.6],[19.0,13.7],[21.0,12.2],[21.1,9.9]].forEach(function(p){puff(p[0],p[1]);});
+ // Natal: árvore com presentes embaixo, na frente-direita da copa (na frente dos puffs, sem tapar quem descansa,
+ // o letreiro nem o texto do piso). Cofre do backup na frente da copa, à esquerda da árvore: fora da faixa dos
+ // balões dos bots (que cobrem a parede do fundo da área de trabalho).
+ (function(){var ax=21.0,ay=D-1.4,cx=16.6,cy=D-1.6;add(2010+ax+ay,function(){presentesNatal(objPar,ax,ay,0);arvoreNatal(objPar,ax,ay);presentesNatal(objPar,ax,ay,1);});
+  add(2010+cx+cy,function(){cofreBackup(objPar,cx,cy,nivelBackup(bkp.v&&bkp.v.at,Date.now()));});})();
  add(21.5+.9,function(){planta(objPar,21.5,.9);});add(14.7+1.4,function(){planta(objPar,14.7,1.4);});add(14.8+14.0,function(){planta(objPar,14.8,14.0);});
  // luminárias pendentes (luz ambiente dourada)
  [[17.6,9.0],[18.4,3.4],[20.4,12.2]].forEach(function(l){add(1990,function(){var g=sv('g',null,objPar),t2=P(l[0],l[1],3.5),b=P(l[0],l[1],2.85);
@@ -832,6 +905,7 @@ function direita(todos,andar){var dir=$('dir');dir.replaceChildren();var cs=anda
   if(pr){var e1=em(pr.next_run),ja=e1.indexOf('em ')===0;nx.appendChild(document.createTextNode((rec[0]?' · ':'')+'próxima rotina '+(ja?'em ':'')));nx.appendChild(el('b',null,ja?e1.slice(3):e1));}
   if(!rec[0]&&!pr)nx.appendChild(document.createTextNode('Sem rotina agendada.'));det.appendChild(nx);
   var lk=linkChat(botSel,'cta','Abrir chat');det.appendChild(lk||el('div','cta off','Sem link de chat'));dir.appendChild(det);}
+ dir.appendChild(cartaoBackup());
  var uc=cartao('noshrink','Consumo da semana'),u2=st.usage;
  if(u2){var p=u2.total_used_pct,r=el('div','cons'),v=el('span','v');v.appendChild(document.createTextNode(pct(p)+'%'));v.appendChild(el('small',null,' usado'));r.appendChild(v);r.appendChild(el('span','r','renova '+dm(u2.resets_at)));uc.appendChild(r);
   var br=el('div','prog'+(p>=90?' max':p>=70?' hi':'')),bi=el('i');bi.style.width=Math.max(0,Math.min(100,p))+'%';br.appendChild(bi);uc.appendChild(br);}
@@ -989,12 +1063,25 @@ function botaoResolver(nome){var bt=el('button','resolver','✓ Resolvido'),conf
    .then(function(r){if(r.status===401){location.href='/';return;}if(!r.ok)throw new Error(String(r.status));load();})
    .catch(function(){bt.disabled=false;conf=false;bt.classList.remove('conf');bt.textContent='Falhou. Tentar de novo';});});
  return bt;}
+// card "Último backup": data/hora (Recife), nº de bots e ok/atrasado. Nunca conteúdo nem nomes de arquivo.
+function kb(n){return n<1024?n+' B':n<1048576?(n/1024).toFixed(1).replace('.',',')+' KB':(n/1048576).toFixed(1).replace('.',',')+' MB';}
+function cartaoBackup(){var v=bkp.v,nv=nivelBackup(v&&v.at,Date.now()),c=cartao('backupc'+(nv==='atrasado'?' atrasado':'')),h=el('div','h');
+ var tt=el('span','t');tt.appendChild(el('span','u','Último '));tt.appendChild(document.createTextNode('backup'));h.appendChild(tt);c.appendChild(h);
+ if(!bkp.ja){c.appendChild(el('div','vazio',bkp.erro?'Não consegui ler o backup agora.':'Carregando…'));return c;}
+ if(!v){c.appendChild(el('div','vazio','Sem backup ainda.'));return c;}
+ var pl=el('span','bkp '+nv);pl.appendChild(el('i'));pl.appendChild(document.createTextNode(nv==='ok'?'ok':'atrasado'));c.firstChild.appendChild(pl);
+ var r=el('div','bkl');r.appendChild(el('span','dt',dm(v.at).replace(' · ','  ')));r.appendChild(el('span','nb',v.bots+(v.bots===1?' bot':' bots')));c.appendChild(r);
+ c.title='Envio mais recente: '+dm(v.at)+' (horário de Recife) · '+v.arquivos+(v.arquivos===1?' arquivo':' arquivos')+' · '+kb(v.bytes)+(nv==='atrasado'?' · atrasado: mais de 26 h sem backup novo':'');return c;}
+function bkLoad(){if(bkp.voo||Date.now()-bkp.em<60000)return;bkp.voo=true;
+ fetch('/api/backup',{credentials:'same-origin',cache:'no-store'}).then(function(r){if(r.status===401){location.href='/';return null;}if(!r.ok)throw new Error(String(r.status));return r.json();})
+  .then(function(d){bkp.voo=false;bkp.em=Date.now();if(!d)return;var k=JSON.stringify(d.backup);if(!bkp.ja||k!==bkp.k){bkp.ja=true;bkp.k=k;bkp.v=d.backup||null;if(st)desenhar();}})
+  .catch(function(){bkp.voo=false;bkp.em=Date.now()-45000;if(!bkp.ja&&!bkp.erro){bkp.erro=true;if(st)desenhar();}});}
 function vivo(ok){var v=$('vivo');v.classList.toggle('off',!ok);$('vivotxt').textContent=ok?'Ao vivo':'sem conexão';}
 function relogio(){$('hora').textContent=fHora.format(new Date());}
 // só redesenha quando algo mudou (ou a cada minuto, para os "há X min")
 function assinatura(s){return JSON.stringify([s.bots,s.roster,s.floors,s.usage,s.feed,s.avatars])+'|'+Math.floor(Date.now()/60000);}
 function load(){fetch('/api/state',{credentials:'same-origin',cache:'no-store'}).then(function(r){if(r.status===401){location.href='/';return null;}return r.json();})
- .then(function(s){if(!s)return;st=s;vivo(true);marcaMov();var a=assinatura(s);if(aba==='org')orgLoad();novasPassagens(s.handoffs);if(a!==sig){sig=a;desenhar();}})
+ .then(function(s){if(!s)return;st=s;vivo(true);marcaMov();var a=assinatura(s);bkLoad();if(aba==='org')orgLoad();novasPassagens(s.handoffs);if(a!==sig){sig=a;desenhar();}})
  .catch(function(){vivo(false);});}
 $('abas').addEventListener('click',function(e){var b=e.target.closest?e.target.closest('button'):null;if(!b)return;var a=b.getAttribute('data-aba');if(a===aba)return;aba=a;zoom=null;neon=null;desenhar();});
 $('C').addEventListener('click',soltar);
@@ -1024,5 +1111,5 @@ export function panelPage(nonce: string): string {
 <div class="lista-wrap" id="lista" hidden></div>
 <div class="org" id="org" hidden></div></section>
 <aside id="dir"></aside></main></div>
-<script nonce="${nonce}">var floorOrder=${floorOrder.toString()};var frescor=${frescor.toString()};var elevSeta=${elevSeta.toString()};var rotaEscritorio=${rotaEscritorio.toString()};var trajeto=${trajeto.toString()};var mudouSentado=${mudouSentado.toString()};var parados=${parados.toString()};var sentaNaMesa=${sentaNaMesa.toString()};var distribuiCopa=${distribuiCopa.toString()};var posicionaRotulo=${posicionaRotulo.toString()};var orgArvore=${orgArvore.toString()};var orgCasa=${orgCasa.toString()};var cargoCurto=${cargoCurto.toString()};var nomeCurto=${nomeCurto.toString()};var orgNovo=${orgNovo.toString()};${CLIENT}</script></body></html>`;
+<script nonce="${nonce}">var floorOrder=${floorOrder.toString()};var frescor=${frescor.toString()};var elevSeta=${elevSeta.toString()};var rotaEscritorio=${rotaEscritorio.toString()};var trajeto=${trajeto.toString()};var mudouSentado=${mudouSentado.toString()};var parados=${parados.toString()};var sentaNaMesa=${sentaNaMesa.toString()};var distribuiCopa=${distribuiCopa.toString()};var nivelBackup=${nivelBackup.toString()};var posicionaRotulo=${posicionaRotulo.toString()};var orgArvore=${orgArvore.toString()};var orgCasa=${orgCasa.toString()};var cargoCurto=${cargoCurto.toString()};var nomeCurto=${nomeCurto.toString()};var orgNovo=${orgNovo.toString()};${CLIENT}</script></body></html>`;
 }

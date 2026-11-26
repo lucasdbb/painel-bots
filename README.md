@@ -24,6 +24,7 @@ pronto para o Railway. Recebe atualizações em `POST /ingest` e mostra o painel
 - `GET /avatar/<nome>`: a foto, protegida por cookie ou Bearer (sem login → 401). Nada é público.
 - `GET /fonts/<orbitron|inter|jetbrains-mono>.woff2`: fontes do visual ANA servidas pelo próprio serviço (a CSP continua sem origem externa: só `font-src 'self'`). Público, sem dado nenhum; qualquer outro nome → 404. Arquivos em `assets/fonts/` (licença OFL).
 - `POST /backup/upload?bot=<nome>&arquivo=<nome.ext>[&data=AAAA-MM-DD]`: backup cru das conversas dos bots. Detalhes em "Backup das conversas".
+- `GET /api/backup`: resumo do último backup para o card "Último backup", protegido como `/api/state`. Só metadados. Detalhes em "Backup das conversas".
 - `GET /health`: público, retorna só `{"ok":true}`.
 
 O painel (visual ANA, tema escuro) tem as abas MAPA (escritório isométrico: quem trabalha, espera ou está com erro senta numa mesa; quem descansa fica na copa), LISTA (todos os bots) e ORGANOGRAMA (quem reporta a quem, com o mesmo boneco e a mesma cor de status do mapa; clicar num bot seleciona e mostra "No organograma" na coluna da direita), a faixa vermelha de erro, "Precisa de você" e "Parado há +12h". Uma passagem de bastão (`handoff`) vira uma linha animada por ~8 s (via elevador quando muda de andar).
@@ -42,7 +43,7 @@ Não há CORS. O `/login` bloqueia o IP por 15 min depois de 10 erros.
 
 > **Dados sensíveis.** Os arquivos de backup têm conversas com dados pessoais e de clientes. A chave de backup fica só
 > no script que envia e na variável do Railway; nunca em código, log ou chat. Não existe rota para ler nem listar
-> backups: o painel só recebe e guarda. Para consultar um backup, acesse o volume direto (Railway), não por HTTP.
+> backups: o painel só recebe, guarda e mostra um resumo numérico (abaixo). Para consultar um backup, acesse o volume direto (Railway), não por HTTP.
 
 - Só `Authorization: Bearer <BACKUP_UPLOAD_TOKEN>` (a `PAINEL_TOKEN` e o cookie de login não valem), comparada em tempo constante.
 - `Content-Type: application/octet-stream`, corpo cru até `BACKUP_MAX_MB` (padrão 20 MB). O conteúdo não é lido, resumido nem processado.
@@ -111,3 +112,17 @@ npm test          # build + testes (node:test)
 npm run typecheck
 PAINEL_TOKEN=$(openssl rand -hex 32) DATA_DIR=./data npm start
 ```
+
+### Card "Último backup" e cofre do escritório
+
+- `GET /api/backup` (cookie de login ou `Bearer <PAINEL_TOKEN>`, igual ao `/api/state`; sem login → 401) devolve
+  `{"backup": {"at", "dia", "bots", "arquivos", "bytes"}}` ou `{"backup": null}` quando ainda não há backup.
+  - `dia`: a pasta `AAAA-MM-DD` mais recente que tem arquivo; `at`: data/hora (ISO, UTC) do arquivo mais novo desse dia;
+    `bots`: pastas de bot com arquivo nesse dia; `arquivos` e `bytes`: quantos arquivos e quantos bytes nesse dia.
+  - Só lê nomes de pasta e `stat` (tamanho e data). Nunca abre um arquivo e não devolve nome de bot nem de arquivo.
+    Ignora temporários e ocultos (`.tmp-*`, `.*`), links simbólicos e pastas fora do padrão. Varre o disco no máximo 1x por minuto (cache em memória, zerado a cada envio novo).
+- Regra de status (o painel não recebe sinal de falha: um envio que falha não chega aqui): **ok** se o backup mais
+  recente tem até 26 h (roda 1x por dia, com 2 h de folga); **atrasado** se é mais velho que isso. Sem backup: "Sem backup ainda.".
+- O card fica na coluna da direita, acima de "Consumo da semana", com data/hora em America/Recife, nº de bots e ok/atrasado
+  (arquivos e tamanho só no tooltip). Em telas com até 860 px de altura ele vira uma linha só.
+- O cofre na copa (ao lado da árvore de Natal) acende o LED verde no ok, âmbar no atrasado e fica apagado sem backup.

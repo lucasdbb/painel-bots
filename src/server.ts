@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { COOKIE_NAME, LoginLimiter, bearer, readCookie, safeEqual, sessionValue } from "./auth.js";
 import { OrgSource } from "./organograma.js";
 import { loginPage, panelPage } from "./page.js";
+import { BackupError, BackupStore, botDir, dayDir, fileName } from "./backup.js";
 import { AVATAR_MAX, Store } from "./store.js";
 import { ValidationError, botName, parseMessage } from "./validate.js";
 
@@ -28,6 +29,11 @@ export interface AppOptions {
   store: Store;
   /** Organograma (Notion no servidor + cache + snapshot). Sem isso, só o snapshot embutido. */
   org?: OrgSource;
+  /**
+   * Backup cru das conversas (POST /backup/upload). Chave PRÓPRIA (BACKUP_UPLOAD_TOKEN), separada da do
+   * /ingest. Sem isso (ou com chave vazia), a rota responde 404: desligada, nunca aberta.
+   */
+  backup?: { token: string; dataDir: string | undefined; maxBytes: number };
   log?: (line: string) => void;
 }
 
@@ -105,6 +111,9 @@ export function createApp(opts: AppOptions): http.Server {
   const log = opts.log ?? ((l: string) => console.log(l));
   const session = sessionValue(token);
   const limiter = new LoginLimiter();
+  const backupToken = opts.backup?.token ?? "";
+  const backupStore = backupToken ? new BackupStore(opts.backup?.dataDir) : null;
+  const backupMax = opts.backup?.maxBytes ?? 0;
 
   function authed(req: http.IncomingMessage): boolean {
     const b = bearer(req.headers.authorization);
@@ -200,6 +209,45 @@ export function createApp(opts: AppOptions): http.Server {
           if (msg.task_truncated) out.task_truncated = true;
         }
         return json(200, out);
+      }
+
+      if (route === "/backup/upload") {
+        // Desligada sem BACKUP_UPLOAD_TOKEN: responde como rota inexistente.
+        if (!backupStore) {
+          req.resume();
+          return json(404, { error: "não encontrado" });
+        }
+        if (method !== "POST") return json(405, { error: "use POST" });
+        // Só Bearer com a chave de backup (a do /ingest e o cookie de login não valem aqui).
+        const b = bearer(req.headers.authorization);
+        if (b === null || !safeEqual(b, backupToken)) {
+          req.resume();
+          return json(401, { error: "não autorizado" });
+        }
+        const ct = String(req.headers["content-type"] ?? "");
+        if (!/^application\/octet-stream\b/i.test(ct)) {
+          req.resume();
+          return json(415, { error: "Content-Type deve ser application/octet-stream" });
+        }
+        const q = new URL(req.url ?? "/", "http://x").searchParams;
+        let bot: string, day: string, file: string;
+        try {
+          bot = botDir(q.get("bot"));
+          day = dayDir(q.get("data"));
+          file = fileName(q.get("arquivo"));
+        } catch (e) {
+          req.resume();
+          throw e;
+        }
+        const body = await readRaw(req, backupMax);
+        if (body.length === 0) return json(400, { error: "corpo vazio" });
+        try {
+          const r = await backupStore.save(bot, day, file, body);
+          return json(201, { ok: true, arquivo: r.path, bytes: body.length, sha256: r.sha256 });
+        } catch (e) {
+          if (e instanceof BackupError) return json(e.status, { error: e.message });
+          throw e;
+        }
       }
 
       if (route === "/avatar") {

@@ -10,6 +10,8 @@ pronto para o Railway. Recebe atualizações em `POST /ingest` e mostra o painel
 | `PAINEL_TOKEN` | sim (mín. 32 caracteres) | Chave de acesso. Sem ela o serviço não sobe. |
 | `DATA_DIR` | não | Pasta do `state.json` (no Railway: o volume, ex. `/data`). Sem ela, só memória. |
 | `NOTION_TOKEN` | não | Token da integração do Notion, só para o ORGANOGRAMA. Lido apenas pelo servidor: nunca vai ao navegador nem ao log. Sem ele o organograma usa o snapshot embutido. A database precisa estar compartilhada com a integração. |
+| `BACKUP_UPLOAD_TOKEN` | não (mín. 32 caracteres) | Chave PRÓPRIA do `POST /backup/upload`, diferente da `PAINEL_TOKEN`. Sem ela (ou curta, ou igual à `PAINEL_TOKEN`) a rota fica desligada (404). |
+| `BACKUP_MAX_MB` | não (padrão 20) | Tamanho máximo de cada envio de backup, em MB. |
 | `PORT` | não (padrão 3000) | O Railway define sozinho. |
 
 ## Rotas
@@ -21,6 +23,7 @@ pronto para o Railway. Recebe atualizações em `POST /ingest` e mostra o painel
 - `POST /avatar?bot=<nome>` (ou header `X-Bot: <nome em encodeURIComponent>`): foto do boneco. Só Bearer, `Content-Type: image/png`, até 512 KB (reduza para ~256 px antes). 401/415/400/413 nos erros. Gravada em `DATA_DIR/avatars/<sha256 do nome>.png`.
 - `GET /avatar/<nome>`: a foto, protegida por cookie ou Bearer (sem login → 401). Nada é público.
 - `GET /fonts/<orbitron|inter|jetbrains-mono>.woff2`: fontes do visual ANA servidas pelo próprio serviço (a CSP continua sem origem externa: só `font-src 'self'`). Público, sem dado nenhum; qualquer outro nome → 404. Arquivos em `assets/fonts/` (licença OFL).
+- `POST /backup/upload?bot=<nome>&arquivo=<nome.ext>[&data=AAAA-MM-DD]`: backup cru das conversas dos bots. Detalhes em "Backup das conversas".
 - `GET /health`: público, retorna só `{"ok":true}`.
 
 O painel (visual ANA, tema escuro) tem as abas MAPA (escritório isométrico: quem trabalha, espera ou está com erro senta numa mesa; quem descansa fica na copa), LISTA (todos os bots) e ORGANOGRAMA (quem reporta a quem, com o mesmo boneco e a mesma cor de status do mapa; clicar num bot seleciona e mostra "No organograma" na coluna da direita), a faixa vermelha de erro, "Precisa de você" e "Parado há +12h". Uma passagem de bastão (`handoff`) vira uma linha animada por ~8 s (via elevador quando muda de andar).
@@ -31,9 +34,30 @@ Quando existe `roster`, só os bots da lista aparecem.
 
 ## Privacidade
 
-O log registra só método, rota e status. Corpo, `step` e token nunca vão para o log.
+O log registra só método, rota e status. Corpo, `step` e token nunca vão para o log (no `/backup/upload`, nem o nome do bot nem o do arquivo).
 Todas as respostas levam `Cache-Control: no-store`, `X-Robots-Tag: noindex` e uma CSP com nonce.
 Não há CORS. O `/login` bloqueia o IP por 15 min depois de 10 erros.
+
+## Backup das conversas
+
+> **Dados sensíveis.** Os arquivos de backup têm conversas com dados pessoais e de clientes. A chave de backup fica só
+> no script que envia e na variável do Railway; nunca em código, log ou chat. Não existe rota para ler nem listar
+> backups: o painel só recebe e guarda. Para consultar um backup, acesse o volume direto (Railway), não por HTTP.
+
+- Só `Authorization: Bearer <BACKUP_UPLOAD_TOKEN>` (a `PAINEL_TOKEN` e o cookie de login não valem), comparada em tempo constante.
+- `Content-Type: application/octet-stream`, corpo cru até `BACKUP_MAX_MB` (padrão 20 MB). O conteúdo não é lido, resumido nem processado.
+- Grava em `DATA_DIR/backups/<bot>/<AAAA-MM-DD>/<arquivo>`, com escrita atômica, permissão 0600 (pastas 0700) e sem sobrescrever (mesmo nome de novo → 409).
+  `bot` vira um nome de pasta simples (`Donna Secretária` → `donna-secretaria`); `data` sem valor = hoje em America/Recife.
+- `arquivo`: letras, números, `.`, `-` e `_`, até 128 caracteres, extensões `.md`, `.json`, `.jsonl`, `.txt` ou `.tar.gz`.
+- Respostas: 201 `{ok, arquivo, bytes, sha256}`; 401 sem chave/chave errada; 400 nome ou data inválidos (barra, `..`, extensão); 413 grande demais; 415 Content-Type errado; 409 já existe;
+  503 se `DATA_DIR` não estiver definido ou gravável (o backup nunca fica só em memória); 404 se `BACKUP_UPLOAD_TOKEN` não estiver definida.
+- No Railway, `DATA_DIR` precisa apontar para um volume; sem volume, os arquivos somem a cada deploy.
+
+```bash
+BK="$(cat /home/box/.secrets/painel-bots-backup-token)"   # caminho proposto, permissão 600
+curl -sS -X POST "$URL/backup/upload?bot=Donna%20Secret%C3%A1ria&data=2026-11-26&arquivo=conversas.jsonl" \
+  -H "Authorization: Bearer $BK" -H "Content-Type: application/octet-stream" --data-binary @conversas.jsonl
+```
 
 ## Chave no box (caminho proposto, ainda não criado)
 

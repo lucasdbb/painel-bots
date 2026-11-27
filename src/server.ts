@@ -5,6 +5,7 @@ import { COOKIE_NAME, LoginLimiter, bearer, readCookie, safeEqual, sessionValue 
 import { OrgSource } from "./organograma.js";
 import { loginPage, panelPage } from "./page.js";
 import { BackupError, BackupStore, botDir, dayDir, fileName } from "./backup.js";
+import { type ResumoBackup, resumoBackup } from "./backup-resumo.js";
 import { AVATAR_MAX, Store } from "./store.js";
 import { ValidationError, botName, parseMessage } from "./validate.js";
 
@@ -114,6 +115,14 @@ export function createApp(opts: AppOptions): http.Server {
   const backupToken = opts.backup?.token ?? "";
   const backupStore = backupToken ? new BackupStore(opts.backup?.dataDir) : null;
   const backupMax = opts.backup?.maxBytes ?? 0;
+  // Resumo do backup (só metadados) para o card do painel: varre o disco no máximo 1x por minuto.
+  const backupDataDir = opts.backup?.dataDir;
+  let resumo: { em: number; v: ResumoBackup | null } | null = null;
+  async function resumoCache(): Promise<ResumoBackup | null> {
+    if (resumo && Date.now() - resumo.em < 60_000) return resumo.v;
+    resumo = { em: Date.now(), v: await resumoBackup(backupDataDir) };
+    return resumo.v;
+  }
 
   function authed(req: http.IncomingMessage): boolean {
     const b = bearer(req.headers.authorization);
@@ -243,6 +252,7 @@ export function createApp(opts: AppOptions): http.Server {
         if (body.length === 0) return json(400, { error: "corpo vazio" });
         try {
           const r = await backupStore.save(bot, day, file, body);
+          resumo = null; // o card mostra o envio novo na próxima leitura
           return json(201, { ok: true, arquivo: r.path, bytes: body.length, sha256: r.sha256 });
         } catch (e) {
           if (e instanceof BackupError) return json(e.status, { error: e.message });
@@ -310,6 +320,14 @@ export function createApp(opts: AppOptions): http.Server {
         if (!authed(req)) return json(401, { error: "não autorizado" });
         store.pruneHandoffs();
         return json(200, store.state);
+      }
+
+      if (route === "/api/backup") {
+        // Só metadados do último backup (data, nº de bots, arquivos, bytes). Mesmo login do /api/state.
+        // Nunca conteúdo, nunca nome de bot ou de arquivo.
+        if (method !== "GET") return json(405, { error: "use GET" });
+        if (!authed(req)) return json(401, { error: "não autorizado" });
+        return json(200, { backup: await resumoCache() });
       }
 
       if (route === "/api/organograma") {
